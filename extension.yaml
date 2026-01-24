@@ -1,0 +1,25 @@
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyExtensionPolicy
+metadata:
+  name: wasm-test
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: myapp
+  wasm:
+    - name: wasm-filter-1
+      rootID: my-root-id
+      code:
+        type: Image
+        image:
+          url: my-url
+      config:
+        webhook_cluster: webhook_cluster
+        webhook_authority: events.int.kyledev.co
+        webhook_path: /api/v1/events/envoy-gateway/http_request
+        headers:
+          - ":method"
+          - ":path"
+          - ":authority"
+          - "client_ip"
