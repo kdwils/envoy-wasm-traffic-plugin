@@ -99,6 +99,7 @@ use std::collections::HashMap;
 #[derive(Serialize)]
 struct EventPayload {
     client_ip: String,
+    authority: String,
     headers: HashMap<String, String>,
 }
 
@@ -179,6 +180,9 @@ impl HttpContext for TrafficPluginHttp {
         let client_ip = self.extract_real_ip();
         log::info!("Extracted client IP: {}", client_ip);
 
+        let authority = self.get_http_request_header(":authority")
+            .unwrap_or_else(|| "unknown".to_string());
+
         let mut headers = HashMap::new();
 
         for header_name in &self.config.headers {
@@ -187,7 +191,11 @@ impl HttpContext for TrafficPluginHttp {
             }
         }
 
-        let payload = EventPayload { client_ip, headers };
+        let payload = EventPayload {
+            client_ip,
+            authority,
+            headers
+        };
 
         let Ok(body) = serde_json::to_vec(&payload) else {
             log::error!("Failed to serialize payload");
