@@ -119,7 +119,12 @@ impl TrafficPluginHttp {
         let peer_ip = self
             .get_property(vec!["source", "address"])
             .and_then(|bytes| String::from_utf8(bytes).ok())
-            .and_then(|addr| addr.split(':').next().map(|s| s.to_string()));
+            .and_then(|addr| {
+                if let Some(stripped) = addr.strip_prefix('[') {
+                    return stripped.split(']').next().map(|s| s.to_string());
+                }
+                addr.split(':').next().map(|s| s.to_string())
+            });
 
         let Some(peer_ip_str) = peer_ip else {
             log::warn!("Could not determine peer IP");
@@ -180,7 +185,8 @@ impl HttpContext for TrafficPluginHttp {
         let client_ip = self.extract_real_ip();
         log::info!("Extracted client IP: {}", client_ip);
 
-        let authority = self.get_http_request_header(":authority")
+        let authority = self
+            .get_http_request_header(":authority")
             .unwrap_or_else(|| "unknown".to_string());
 
         let mut headers = HashMap::new();
@@ -194,7 +200,7 @@ impl HttpContext for TrafficPluginHttp {
         let payload = EventPayload {
             client_ip,
             authority,
-            headers
+            headers,
         };
 
         let Ok(body) = serde_json::to_vec(&payload) else {
