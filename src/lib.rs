@@ -2,6 +2,8 @@ use proxy_wasm::traits::*;
 use proxy_wasm::types::*;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+use std::net::IpAddr;
+use ipnet::IpNet;
 
 proxy_wasm::main! {{
     proxy_wasm::set_log_level(LogLevel::Trace);
@@ -22,6 +24,7 @@ struct PluginConfig {
     webhook_authority: String,
     webhook_path: String,
     headers: Vec<String>,
+    trusted_proxies: Vec<IpNet>,
 }
 
 #[derive(Deserialize)]
@@ -29,7 +32,10 @@ struct PluginConfigYaml {
     webhook_cluster: String,
     webhook_authority: String,
     webhook_path: String,
+    #[serde(default)]
     headers: Vec<String>,
+    #[serde(default)]
+    trusted_proxies: Vec<String>,
 }
 
 impl Context for TrafficPluginRoot {}
@@ -50,12 +56,24 @@ impl RootContext for TrafficPluginRoot {
         self.config.webhook_authority = config.webhook_authority;
         self.config.webhook_path = config.webhook_path;
         self.config.headers = config.headers;
+
+        self.config.trusted_proxies = config.trusted_proxies
+            .iter()
+            .filter_map(|cidr| {
+                cidr.parse::<IpNet>().ok().or_else(|| {
+                    log::warn!("Failed to parse trusted proxy CIDR: {}", cidr);
+                    None
+                })
+            })
+            .collect();
+
         log::info!(
-            "Configured webhook_cluster: {}, webhook_authority: {}, webhook_path: {}, headers: {:?}",
+            "Configured webhook_cluster: {}, webhook_authority: {}, webhook_path: {}, headers: {:?}, trusted_proxies: {} ranges",
             self.config.webhook_cluster,
             self.config.webhook_authority,
             self.config.webhook_path,
-            self.config.headers
+            self.config.headers,
+            self.config.trusted_proxies.len()
         );
         true
     }
@@ -79,6 +97,7 @@ use std::collections::HashMap;
 
 #[derive(Serialize)]
 struct EventPayload {
+    client_ip: String,
     headers: HashMap<String, String>,
 }
 
@@ -87,10 +106,55 @@ impl Context for TrafficPluginHttp {
         &mut self,
         _token_id: u32,
         _num_headers: usize,
-        body_size: usize,
+        _body_size: usize,
         _num_trailers: usize,
     ) {
-        log::info!("Received webhook response, body size: {}", body_size);
+    }
+}
+
+impl TrafficPluginHttp {
+    fn extract_real_ip(&self) -> String {
+        let peer_ip = self.get_property(vec!["source", "address"])
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .and_then(|addr| {
+                addr.split(':').next().map(|s| s.to_string())
+            });
+
+        let Some(peer_ip_str) = peer_ip else {
+            log::warn!("Could not determine peer IP");
+            return "unknown".to_string();
+        };
+
+        let Ok(peer_addr) = peer_ip_str.parse::<IpAddr>() else {
+            log::warn!("Could not parse peer IP: {}", peer_ip_str);
+            return peer_ip_str;
+        };
+
+        let is_trusted = self.config.trusted_proxies.iter()
+            .any(|net| net.contains(&peer_addr));
+
+        if !is_trusted {
+            return peer_ip_str;
+        }
+
+        let Some(xff) = self.get_http_request_header("x-forwarded-for") else {
+            log::debug!("Trusted proxy but no X-Forwarded-For header, using peer IP");
+            return peer_ip_str;
+        };
+
+        let ips: Vec<&str> = xff.split(',').map(|s| s.trim()).collect();
+        for ip_str in ips.iter().rev() {
+            if let Ok(ip) = ip_str.parse::<IpAddr>() {
+                let is_trusted_xff = self.config.trusted_proxies.iter()
+                    .any(|net| net.contains(&ip));
+
+                if !is_trusted_xff {
+                    return ip_str.to_string();
+                }
+            }
+        }
+
+        ips.first().map(|s| s.to_string()).unwrap_or(peer_ip_str)
     }
 }
 
@@ -106,10 +170,8 @@ impl HttpContext for TrafficPluginHttp {
             return Action::Continue;
         }
 
-        if self.config.headers.is_empty() {
-            log::warn!("No headers configured");
-            return Action::Continue;
-        }
+        let client_ip = self.extract_real_ip();
+        log::info!("Extracted client IP: {}", client_ip);
 
         let mut headers = HashMap::new();
 
@@ -119,7 +181,10 @@ impl HttpContext for TrafficPluginHttp {
             }
         }
 
-        let payload = EventPayload { headers };
+        let payload = EventPayload {
+            client_ip,
+            headers
+        };
 
         let Ok(body) = serde_json::to_vec(&payload) else {
             log::error!("Failed to serialize payload");
@@ -138,7 +203,7 @@ impl HttpContext for TrafficPluginHttp {
             http_headers,
             Some(&body),
             vec![],
-            Duration::from_secs(5),
+            Duration::ZERO,
         ) {
             Ok(call_id) => {
                 log::info!("Dispatched HTTP call with id: {}", call_id);
