@@ -1,9 +1,9 @@
+use ipnet::IpNet;
 use proxy_wasm::traits::*;
 use proxy_wasm::types::*;
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
 use std::net::IpAddr;
-use ipnet::IpNet;
+use std::time::Duration;
 
 proxy_wasm::main! {{
     proxy_wasm::set_log_level(LogLevel::Trace);
@@ -57,7 +57,8 @@ impl RootContext for TrafficPluginRoot {
         self.config.webhook_path = config.webhook_path;
         self.config.headers = config.headers;
 
-        self.config.trusted_proxies = config.trusted_proxies
+        self.config.trusted_proxies = config
+            .trusted_proxies
             .iter()
             .filter_map(|cidr| {
                 cidr.parse::<IpNet>().ok().or_else(|| {
@@ -114,11 +115,10 @@ impl Context for TrafficPluginHttp {
 
 impl TrafficPluginHttp {
     fn extract_real_ip(&self) -> String {
-        let peer_ip = self.get_property(vec!["source", "address"])
+        let peer_ip = self
+            .get_property(vec!["source", "address"])
             .and_then(|bytes| String::from_utf8(bytes).ok())
-            .and_then(|addr| {
-                addr.split(':').next().map(|s| s.to_string())
-            });
+            .and_then(|addr| addr.split(':').next().map(|s| s.to_string()));
 
         let Some(peer_ip_str) = peer_ip else {
             log::warn!("Could not determine peer IP");
@@ -130,7 +130,10 @@ impl TrafficPluginHttp {
             return peer_ip_str;
         };
 
-        let is_trusted = self.config.trusted_proxies.iter()
+        let is_trusted = self
+            .config
+            .trusted_proxies
+            .iter()
             .any(|net| net.contains(&peer_addr));
 
         if !is_trusted {
@@ -145,7 +148,10 @@ impl TrafficPluginHttp {
         let ips: Vec<&str> = xff.split(',').map(|s| s.trim()).collect();
         for ip_str in ips.iter().rev() {
             if let Ok(ip) = ip_str.parse::<IpAddr>() {
-                let is_trusted_xff = self.config.trusted_proxies.iter()
+                let is_trusted_xff = self
+                    .config
+                    .trusted_proxies
+                    .iter()
                     .any(|net| net.contains(&ip));
 
                 if !is_trusted_xff {
@@ -181,10 +187,7 @@ impl HttpContext for TrafficPluginHttp {
             }
         }
 
-        let payload = EventPayload {
-            client_ip,
-            headers
-        };
+        let payload = EventPayload { client_ip, headers };
 
         let Ok(body) = serde_json::to_vec(&payload) else {
             log::error!("Failed to serialize payload");
@@ -203,7 +206,7 @@ impl HttpContext for TrafficPluginHttp {
             http_headers,
             Some(&body),
             vec![],
-            Duration::ZERO,
+            Duration::from_secs(5),
         ) {
             Ok(call_id) => {
                 log::info!("Dispatched HTTP call with id: {}", call_id);
