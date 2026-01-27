@@ -120,6 +120,7 @@ impl TrafficPluginHttp {
             .get_property(vec!["source", "address"])
             .and_then(|bytes| String::from_utf8(bytes).ok())
             .and_then(|addr| {
+                log::warn!("Parsed address string: '{}'", addr);
                 if let Some(stripped) = addr.strip_prefix('[') {
                     return stripped.split(']').next().map(|s| s.to_string());
                 }
@@ -127,7 +128,7 @@ impl TrafficPluginHttp {
             });
 
         let Some(peer_ip_str) = peer_ip else {
-            log::warn!("Could not determine peer IP");
+            log::debug!("Could not determine peer IP");
             return "unknown".to_string();
         };
 
