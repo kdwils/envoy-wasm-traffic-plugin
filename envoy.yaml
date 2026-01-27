@@ -34,7 +34,7 @@ static_resources:
                         configuration:
                           "@type": "type.googleapis.com/google.protobuf.StringValue"
                           value: |
-                            {"webhook_cluster": "webhook_cluster", "webhook_authority": "events.int.kyledev.co", "webhook_path": "/api/v1/events/kyle/test", "headers": [":method", ":path", ":authority"]}
+                            {"webhook_cluster": "webhook_cluster", "webhook_authority": "events.int.kyledev.co", "webhook_path": "/api/v1/events/kyle/test", "headers": [":method", ":path", ":authority"], "trusted_proxies": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.1/32"]}
                         vm_config:
                           runtime: "envoy.wasm.runtime.v8"
                           code:
