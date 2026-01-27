@@ -4,9 +4,11 @@ A WebAssembly plugin for Envoy Gateway that sends HTTP request events to a webho
 
 ## Features
 
+- Extracts real client IP from X-Forwarded-For headers with trusted proxy support
+- Automatically includes client IP and authority in webhook payload
+- Supports trusted proxy IP/CIDR ranges for secure IP extraction
 - Extracts configured headers from incoming HTTP requests
-- Sends header data as JSON to a webhook endpoint via HTTP POST
-- Configurable list of headers to track
+- Sends event data as JSON to a webhook endpoint via HTTP POST
 - Non-blocking fire-and-forget webhook calls
 
 ## Building
@@ -59,8 +61,10 @@ config:
   headers:
     - ":method"
     - ":path"
-    - ":authority"
-    - "x-forwarded-for"
+  trusted_proxies:
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
 ```
 
 ## Configuration Reference
@@ -74,13 +78,29 @@ The hostname for the `:authority` HTTP/2 header. Should match the actual hostnam
 ### webhook_path (required)
 The HTTP path to POST events to on the webhook service.
 
-### headers (required)
+### headers (optional)
 Array of header names to extract from requests. Common values:
 - `:method` - HTTP method (GET, POST, etc.)
 - `:path` - Request path
-- `:authority` - Host header
-- `x-forwarded-for` - Client IP
 - Any custom headers
+
+Note: `client_ip` and `authority` are included by default and don't need to be in this list.
+
+### trusted_proxies (optional)
+Array of IP addresses or CIDR ranges representing trusted proxies. When a request comes from a trusted proxy, the plugin will parse the `X-Forwarded-For` header to extract the real client IP.
+
+Examples:
+- Single IP: `"192.168.1.1/32"`
+- CIDR range: `"10.0.0.0/8"`
+- Private networks: `["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]`
+
+**How it works:**
+1. If the peer IP is **not** in `trusted_proxies`, the peer IP is used as the client IP
+2. If the peer IP **is** in `trusted_proxies`, the plugin parses `X-Forwarded-For`
+3. Walks backwards through the XFF chain to find the first untrusted IP
+4. That untrusted IP is the real client IP
+
+This prevents IP spoofing by only trusting XFF headers from known proxies.
 
 ## Webhook Payload
 
@@ -88,16 +108,21 @@ The plugin sends a JSON payload with the following structure:
 
 ```json
 {
+  "client_ip": "203.0.113.42",
+  "authority": "example.com",
   "headers": {
     ":method": "GET",
-    ":path": "/api/users",
-    ":authority": "example.com",
-    "x-forwarded-for": "192.168.1.1"
+    ":path": "/api/users"
   }
 }
 ```
 
-Only headers that exist in the request are included.
+**Default fields** (always included):
+- `client_ip` - Real client IP extracted from X-Forwarded-For (if from trusted proxy) or peer IP
+- `authority` - The `:authority` header (Host header)
+
+**Additional headers:**
+Only headers specified in the `headers` configuration array that exist in the request are included.
 
 ## Development
 
