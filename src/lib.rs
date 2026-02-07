@@ -43,12 +43,10 @@ impl Context for TrafficPluginRoot {}
 impl RootContext for TrafficPluginRoot {
     fn on_configure(&mut self, _: usize) -> bool {
         let Some(config_bytes) = self.get_plugin_configuration() else {
-            log::error!("No configuration provided");
             return false;
         };
 
         let Ok(config) = serde_json::from_slice::<PluginConfigYaml>(&config_bytes) else {
-            log::error!("Failed to parse configuration");
             return false;
         };
 
@@ -174,17 +172,14 @@ impl TrafficPluginHttp {
 impl HttpContext for TrafficPluginHttp {
     fn on_http_request_headers(&mut self, _: usize, _: bool) -> Action {
         if self.config.webhook_cluster.is_empty() {
-            log::warn!("Webhook cluster not configured");
             return Action::Continue;
         }
 
         if self.config.webhook_path.is_empty() {
-            log::warn!("Webhook path not configured");
             return Action::Continue;
         }
 
         let client_ip = self.extract_real_ip();
-        log::info!("Extracted client IP: {}", client_ip);
 
         let authority = self
             .get_http_request_header(":authority")
@@ -205,7 +200,6 @@ impl HttpContext for TrafficPluginHttp {
         };
 
         let Ok(body) = serde_json::to_vec(&payload) else {
-            log::error!("Failed to serialize payload");
             return Action::Continue;
         };
 
@@ -223,12 +217,8 @@ impl HttpContext for TrafficPluginHttp {
             vec![],
             Duration::from_secs(5),
         ) {
-            Ok(call_id) => {
-                log::info!("Dispatched HTTP call with id: {}", call_id);
-            }
-            Err(e) => {
-                log::error!("Failed to dispatch HTTP call: {:?}", e);
-            }
+            Ok(_) => {}
+            Err(_) => {}
         }
 
         Action::Continue
