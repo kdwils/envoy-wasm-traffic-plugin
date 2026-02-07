@@ -58,22 +58,9 @@ impl RootContext for TrafficPluginRoot {
         self.config.trusted_proxies = config
             .trusted_proxies
             .iter()
-            .filter_map(|cidr| {
-                cidr.parse::<IpNet>().ok().or_else(|| {
-                    log::warn!("Failed to parse trusted proxy CIDR: {}", cidr);
-                    None
-                })
-            })
+            .filter_map(|cidr| cidr.parse::<IpNet>().ok().or_else(|| None))
             .collect();
 
-        log::info!(
-            "Configured webhook_cluster: {}, webhook_authority: {}, webhook_path: {}, headers: {:?}, trusted_proxies: {} ranges",
-            self.config.webhook_cluster,
-            self.config.webhook_authority,
-            self.config.webhook_path,
-            self.config.headers,
-            self.config.trusted_proxies.len()
-        );
         true
     }
 
@@ -118,7 +105,6 @@ impl TrafficPluginHttp {
             .get_property(vec!["source", "address"])
             .and_then(|bytes| String::from_utf8(bytes).ok())
             .and_then(|addr| {
-                log::warn!("Parsed address string: '{}'", addr);
                 if let Some(stripped) = addr.strip_prefix('[') {
                     return stripped.split(']').next().map(|s| s.to_string());
                 }
@@ -126,12 +112,10 @@ impl TrafficPluginHttp {
             });
 
         let Some(peer_ip_str) = peer_ip else {
-            log::debug!("Could not determine peer IP");
             return "unknown".to_string();
         };
 
         let Ok(peer_addr) = peer_ip_str.parse::<IpAddr>() else {
-            log::warn!("Could not parse peer IP: {}", peer_ip_str);
             return peer_ip_str;
         };
 
@@ -146,7 +130,6 @@ impl TrafficPluginHttp {
         }
 
         let Some(xff) = self.get_http_request_header("x-forwarded-for") else {
-            log::debug!("Trusted proxy but no X-Forwarded-For header, using peer IP");
             return peer_ip_str;
         };
 
